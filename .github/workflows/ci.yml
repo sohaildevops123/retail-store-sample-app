@@ -24,6 +24,9 @@ env:
   AWS_REGION: us-west-2
   ECR_REGISTRY: 032398582096.dkr.ecr.us-west-2.amazonaws.com
 
+permissions:
+  contents: write
+
 jobs:
   detect-changes:
     name: Detect Changed Services
@@ -87,6 +90,8 @@ jobs:
       - name: Checkout code
         if: matrix.changed == 'true'
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure AWS credentials
         if: matrix.changed == 'true'
@@ -125,7 +130,6 @@ jobs:
         run: |
           VALUES_FILE="src/${{ matrix.service }}/chart/values.yaml"
 
-          # Update only the top-level image.repository (first occurrence)
           awk '
             /^image:/ { in_image=1 }
             in_image && /^\s+repository:/ && !repo_done {
@@ -146,9 +150,10 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+
           git add src/${{ matrix.service }}/chart/values.yaml
 
-          # Only commit if there are actual changes
           git diff --cached --quiet || \
             git commit -m "ci(${{ matrix.service }}): update image tag to ${{ steps.tag.outputs.IMAGE_TAG }} [skip ci]"
 
