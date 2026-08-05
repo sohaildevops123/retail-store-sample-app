@@ -14,11 +14,11 @@ COPY mvnw .
 RUN chmod +x mvnw && sed -i 's/\r//' mvnw
 COPY pom.xml .
 
-RUN ./mvnw dependency:go-offline -B -q
+RUN ./mvnw dependency:go-offline -B
 
 COPY ./src ./src
 
-RUN ./mvnw -DskipTests package -q && \
+RUN ./mvnw -DskipTests package && \
     mv /target/ui-0.0.1-SNAPSHOT.jar /app.jar
 
 # Package Stage
