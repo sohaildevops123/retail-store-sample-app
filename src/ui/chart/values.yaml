@@ -6,7 +6,7 @@ replicaCount: 1
 image:
   repository: "032398582096.dkr.ecr.us-west-2.amazonaws.com/demo-private/ui"
   pullPolicy: Always
-  tag: "2927478d"
+  tag: "894b2359"
 imagePullSecrets:
   - name: regcred
 nameOverride: ""
