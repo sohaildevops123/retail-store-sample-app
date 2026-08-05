@@ -1,0 +1,155 @@
+name: CI - Build, Push & Update Helm Charts
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/cart/**'
+      - 'src/catalog/**'
+      - 'src/checkout/**'
+      - 'src/orders/**'
+      - 'src/ui/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/cart/**'
+      - 'src/catalog/**'
+      - 'src/checkout/**'
+      - 'src/orders/**'
+      - 'src/ui/**'
+
+env:
+  AWS_REGION: us-west-2
+  ECR_REGISTRY: 032398582096.dkr.ecr.us-west-2.amazonaws.com
+
+jobs:
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      cart:     ${{ steps.filter.outputs.cart }}
+      catalog:  ${{ steps.filter.outputs.catalog }}
+      checkout: ${{ steps.filter.outputs.checkout }}
+      orders:   ${{ steps.filter.outputs.orders }}
+      ui:       ${{ steps.filter.outputs.ui }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Detect changed services
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            cart:
+              - 'src/cart/**'
+            catalog:
+              - 'src/catalog/**'
+            checkout:
+              - 'src/checkout/**'
+            orders:
+              - 'src/orders/**'
+            ui:
+              - 'src/ui/**'
+
+  build-push-update:
+    name: Build & Push - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.cart == 'true' ||
+      needs.detect-changes.outputs.catalog == 'true' ||
+      needs.detect-changes.outputs.checkout == 'true' ||
+      needs.detect-changes.outputs.orders == 'true' ||
+      needs.detect-changes.outputs.ui == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: cart
+            changed: ${{ needs.detect-changes.outputs.cart }}
+          - service: catalog
+            changed: ${{ needs.detect-changes.outputs.catalog }}
+          - service: checkout
+            changed: ${{ needs.detect-changes.outputs.checkout }}
+          - service: orders
+            changed: ${{ needs.detect-changes.outputs.orders }}
+          - service: ui
+            changed: ${{ needs.detect-changes.outputs.ui }}
+
+    steps:
+      - name: Skip if service unchanged
+        if: matrix.changed != 'true'
+        run: echo "No changes in ${{ matrix.service }}, skipping."
+
+      - name: Checkout code
+        if: matrix.changed == 'true'
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        if: matrix.changed == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: matrix.changed == 'true'
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        if: matrix.changed == 'true'
+        id: tag
+        run: echo "IMAGE_TAG=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        if: matrix.changed == 'true'
+        run: |
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/demo-private/${{ matrix.service }}:${{ steps.tag.outputs.IMAGE_TAG }} \
+            -t ${{ env.ECR_REGISTRY }}/demo-private/${{ matrix.service }}:latest \
+            ./src/${{ matrix.service }}
+
+      - name: Push Docker image to ECR
+        if: matrix.changed == 'true'
+        run: |
+          docker push ${{ env.ECR_REGISTRY }}/demo-private/${{ matrix.service }}:${{ steps.tag.outputs.IMAGE_TAG }}
+          docker push ${{ env.ECR_REGISTRY }}/demo-private/${{ matrix.service }}:latest
+
+      - name: Update Helm chart image tag
+        if: matrix.changed == 'true' && github.ref == 'refs/heads/main'
+        run: |
+          VALUES_FILE="src/${{ matrix.service }}/chart/values.yaml"
+
+          # Update only the top-level image.repository (first occurrence)
+          awk '
+            /^image:/ { in_image=1 }
+            in_image && /^\s+repository:/ && !repo_done {
+              sub(/repository:.*/, "repository: \"${{ env.ECR_REGISTRY }}/demo-private/${{ matrix.service }}\"")
+              repo_done=1
+            }
+            in_image && /^\s+tag:/ && !tag_done {
+              sub(/tag:.*/, "tag: \"${{ steps.tag.outputs.IMAGE_TAG }}\"")
+              tag_done=1
+            }
+            /^[a-zA-Z]/ && !/^image:/ { in_image=0 }
+            { print }
+          ' "$VALUES_FILE" > "$VALUES_FILE.tmp" && mv "$VALUES_FILE.tmp" "$VALUES_FILE"
+
+      - name: Commit and push Helm chart update
+        if: matrix.changed == 'true' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add src/${{ matrix.service }}/chart/values.yaml
+
+          # Only commit if there are actual changes
+          git diff --cached --quiet || \
+            git commit -m "ci(${{ matrix.service }}): update image tag to ${{ steps.tag.outputs.IMAGE_TAG }} [skip ci]"
+
+          git push
