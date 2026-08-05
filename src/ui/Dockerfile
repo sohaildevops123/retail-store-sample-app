@@ -25,14 +25,15 @@ RUN ./mvnw -DskipTests package && \
 FROM eclipse-temurin:21-jre
 
 ENV APPUSER=appuser
-ENV APPUID=1001
-ENV APPGID=1001
+ENV APPUID=1000
+ENV APPGID=1000
 
 RUN useradd \
     --home-dir "/app" \
     --create-home \
     --user-group \
     --uid "$APPUID" \
+    --non-unique \
     "$APPUSER"
 
 ENV JAVA_TOOL_OPTIONS=
