@@ -79,29 +79,42 @@ jobs:
       matrix:
         include:
           - service: cart
-            changed: ${{ needs.detect-changes.outputs.cart == 'true' || github.event_name == 'workflow_dispatch' }}
           - service: catalog
-            changed: ${{ needs.detect-changes.outputs.catalog == 'true' || github.event_name == 'workflow_dispatch' }}
           - service: checkout
-            changed: ${{ needs.detect-changes.outputs.checkout == 'true' || github.event_name == 'workflow_dispatch' }}
           - service: orders
-            changed: ${{ needs.detect-changes.outputs.orders == 'true' || github.event_name == 'workflow_dispatch' }}
           - service: ui
-            changed: ${{ needs.detect-changes.outputs.ui == 'true' || github.event_name == 'workflow_dispatch' }}
 
     steps:
-      - name: Skip if service unchanged
-        if: matrix.changed != 'true'
-        run: echo "No changes in ${{ matrix.service }}, skipping."
+      - name: Check if service should build
+        id: should_build
+        run: |
+          EVENT="${{ github.event_name }}"
+          SERVICE="${{ matrix.service }}"
+          if [ "$EVENT" == "workflow_dispatch" ]; then
+            echo "BUILD=true" >> $GITHUB_OUTPUT
+          elif [ "$SERVICE" == "cart" ] && [ "${{ needs.detect-changes.outputs.cart }}" == "true" ]; then
+            echo "BUILD=true" >> $GITHUB_OUTPUT
+          elif [ "$SERVICE" == "catalog" ] && [ "${{ needs.detect-changes.outputs.catalog }}" == "true" ]; then
+            echo "BUILD=true" >> $GITHUB_OUTPUT
+          elif [ "$SERVICE" == "checkout" ] && [ "${{ needs.detect-changes.outputs.checkout }}" == "true" ]; then
+            echo "BUILD=true" >> $GITHUB_OUTPUT
+          elif [ "$SERVICE" == "orders" ] && [ "${{ needs.detect-changes.outputs.orders }}" == "true" ]; then
+            echo "BUILD=true" >> $GITHUB_OUTPUT
+          elif [ "$SERVICE" == "ui" ] && [ "${{ needs.detect-changes.outputs.ui }}" == "true" ]; then
+            echo "BUILD=true" >> $GITHUB_OUTPUT
+          else
+            echo "BUILD=false" >> $GITHUB_OUTPUT
+            echo "Skipping $SERVICE - no changes detected"
+          fi
 
       - name: Checkout code
-        if: matrix.changed == 'true'
+        if: steps.should_build.outputs.BUILD == 'true'
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
 
       - name: Configure AWS credentials
-        if: matrix.changed == 'true'
+        if: steps.should_build.outputs.BUILD == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -109,12 +122,12 @@ jobs:
           aws-region:            ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        if: matrix.changed == 'true'
+        if: steps.should_build.outputs.BUILD == 'true'
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set image tag
-        if: matrix.changed == 'true'
+        if: steps.should_build.outputs.BUILD == 'true'
         id: tag
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
@@ -124,7 +137,7 @@ jobs:
           fi
 
       - name: Build Docker image
-        if: matrix.changed == 'true'
+        if: steps.should_build.outputs.BUILD == 'true'
         run: |
           docker build \
             -t ${{ env.ECR_REGISTRY }}/demo-private/${{ matrix.service }}:${{ steps.tag.outputs.IMAGE_TAG }} \
@@ -132,16 +145,15 @@ jobs:
             ./src/${{ matrix.service }}
 
       - name: Push Docker image to ECR
-        if: matrix.changed == 'true'
+        if: steps.should_build.outputs.BUILD == 'true'
         run: |
           docker push ${{ env.ECR_REGISTRY }}/demo-private/${{ matrix.service }}:${{ steps.tag.outputs.IMAGE_TAG }}
           docker push ${{ env.ECR_REGISTRY }}/demo-private/${{ matrix.service }}:latest
 
       - name: Update Helm chart image tag
-        if: matrix.changed == 'true' && github.ref == 'refs/heads/main'
+        if: steps.should_build.outputs.BUILD == 'true' && github.ref == 'refs/heads/main'
         run: |
           VALUES_FILE="src/${{ matrix.service }}/chart/values.yaml"
-
           awk '
             /^image:/ { in_image=1 }
             in_image && /^\s+repository:/ && !repo_done {
@@ -157,19 +169,14 @@ jobs:
           ' "$VALUES_FILE" > "$VALUES_FILE.tmp" && mv "$VALUES_FILE.tmp" "$VALUES_FILE"
 
       - name: Commit and push Helm chart update
-        if: matrix.changed == 'true' && github.ref == 'refs/heads/main'
+        if: steps.should_build.outputs.BUILD == 'true' && github.ref == 'refs/heads/main'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}
-
           git add src/${{ matrix.service }}/chart/values.yaml
-
           git diff --cached --quiet || \
             git commit -m "ci(${{ matrix.service }}): update image tag to ${{ steps.tag.outputs.IMAGE_TAG }} [skip ci]"
-
-          # Retry push up to 5 times to handle concurrent pushes
           for i in 1 2 3 4 5; do
             git pull origin main --rebase && git push && break
             echo "Push attempt $i failed, retrying in 5 seconds..."
