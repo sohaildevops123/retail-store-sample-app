@@ -6,7 +6,7 @@ replicaCount: 1
 image:
   repository: "032398582096.dkr.ecr.us-west-2.amazonaws.com/demo-private/cart"
   pullPolicy: Always
-  tag: "d9538748"
+  tag: "0454acdf"
 imagePullSecrets:
   - name: regcred
 nameOverride: ""
