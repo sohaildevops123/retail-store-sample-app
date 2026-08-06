@@ -2,6 +2,11 @@ name: CI - Build, Push & Update Helm Charts
 
 on:
   workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build all services'
+        required: false
+        default: 'true'
   push:
     branches:
       - main
@@ -63,6 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: |
+      github.event_name == 'workflow_dispatch' ||
       needs.detect-changes.outputs.cart == 'true' ||
       needs.detect-changes.outputs.catalog == 'true' ||
       needs.detect-changes.outputs.checkout == 'true' ||
@@ -73,15 +79,15 @@ jobs:
       matrix:
         include:
           - service: cart
-            changed: ${{ needs.detect-changes.outputs.cart }}
+            changed: ${{ needs.detect-changes.outputs.cart == 'true' || github.event_name == 'workflow_dispatch' }}
           - service: catalog
-            changed: ${{ needs.detect-changes.outputs.catalog }}
+            changed: ${{ needs.detect-changes.outputs.catalog == 'true' || github.event_name == 'workflow_dispatch' }}
           - service: checkout
-            changed: ${{ needs.detect-changes.outputs.checkout }}
+            changed: ${{ needs.detect-changes.outputs.checkout == 'true' || github.event_name == 'workflow_dispatch' }}
           - service: orders
-            changed: ${{ needs.detect-changes.outputs.orders }}
+            changed: ${{ needs.detect-changes.outputs.orders == 'true' || github.event_name == 'workflow_dispatch' }}
           - service: ui
-            changed: ${{ needs.detect-changes.outputs.ui }}
+            changed: ${{ needs.detect-changes.outputs.ui == 'true' || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Skip if service unchanged
