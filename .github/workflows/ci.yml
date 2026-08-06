@@ -116,7 +116,12 @@ jobs:
       - name: Set image tag
         if: matrix.changed == 'true'
         id: tag
-        run: echo "IMAGE_TAG=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "IMAGE_TAG=$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
+          else
+            echo "IMAGE_TAG=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build Docker image
         if: matrix.changed == 'true'
