@@ -1,6 +1,7 @@
 name: CI - Build, Push & Update Helm Charts
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
